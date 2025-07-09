@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SoccerTR - Futbol Oyunu</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden; /* Canvas'ın dışına taşmayı engelle */
+            font-family: Arial, sans-serif;
+            background-color: #1a1a1a;
+            color: #eee;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+        #game-container {
+            position: relative;
+            width: 100%;
+            height: calc(100vh - 60px); /* Üst menü için yer ayır */
+        }
+        canvas {
+            display: block;
+        }
+        #ui-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none; /* UI elemanları dışındaki tıklamaların 3D sahneye geçmesini sağlar */
+            z-index: 10;
+        }
+        .main-menu, .language-selection {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: rgba(0, 0, 0, 0.8);
+            padding: 30px;
+            border-radius: 10px;
+            text-align: center;
+            box-shadow: 0 0 20px rgba(0, 255, 0, 0.5);
+            pointer-events: all; /* Bu div'deki elemanların tıklanabilir olmasını sağlar */
+        }
+        .main-menu h1, .language-selection h2 {
+            color: #00ff00;
+            margin-bottom: 25px;
+        }
+        .main-menu button, .language-selection button {
+            display: block;
+            width: 250px;
+            padding: 15px;
+            margin-bottom: 15px;
+            background-color: #008800;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            font-size: 1.1em;
+            cursor: pointer;
+            transition: background-color 0.3s ease, transform 0.2s ease;
+        }
+        .main-menu button:hover, .language-selection button:hover {
+            background-color: #00aa00;
+            transform: translateY(-2px);
+        }
+        #top-bar {
+            width: 100%;
+            height: 60px;
+            background-color: #333;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0 20px;
+            box-sizing: border-box;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
+            z-index: 20;
+        }
+        #coin-display {
+            font-size: 1.2em;
+            color: #ffd700; /* Altın rengi */
+            font-weight: bold;
+        }
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="top-bar">
+        <span>SoccerTR</span>
+        <span id="coin-display">Coins: 1000</span>
+    </div>
+
+    <div id="game-container">
+        <div id="ui-overlay">
+            <div id="language-screen" class="language-selection">
+                <h2>Dil Seçimi / Language Selection</h2>
+                <button onclick="selectLanguage('tr')">Türkçe</button>
+                <button onclick="selectLanguage('en')">English</button>
+                <button onclick="selectLanguage('ar')">العربية</button>
+                <button onclick="selectLanguage('br')">Português (Brasil)</button>
+                <button onclick="selectLanguage('pt')">Português (Portugal)</button>
+                </div>
+
+            <div id="main-menu" class="main-menu hidden">
+                <h1 data-key="gameTitle">SoccerTR</h1>
+                <button data-key="matchButton" onclick="startGame('match')">Maç Yap</button>
+                <button data-key="packOpenButton" onclick="startGame('pack')">Paket Aç</button>
+                <button data-key="squadButton" onclick="startGame('squad')">Kadro</button>
+                <button data-key="leaguesButton" onclick="startGame('leagues')">Ligler</button>
+                <button data-key="settingsButton" onclick="startGame('settings')">Ayarlar</button>
+            </div>
+
+            <div id="match-selection-menu" class="main-menu hidden">
+                <h1 data-key="matchSelectionTitle">Maç Seçimi</h1>
+                <button data-key="1v1BotMatch" onclick="startMatch('1v1')">1v1 (Bot)</button>
+                <button data-key="11v11BotMatch" onclick="startMatch('11v11')">11v11 (Bot)</button>
+                <button data-key="backButton" onclick="showMainMenu()">Geri</button>
+            </div>
+
+            <div id="shot-bar" style="position: absolute; bottom: 50px; left: 50%; transform: translateX(-50%); width: 300px; height: 20px; background-color: #555; border-radius: 10px; overflow: hidden; display: none; pointer-events: none;">
+                <div id="shot-power" style="width: 0%; height: 100%; background: linear-gradient to right, green, orange, red);"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.165.0/three.min.js"></script>
+    <script>
+        // --- Three.js Sahnesi Kurulumu ---
+        let scene, camera, renderer, ball, field, goal1, goal2;
+        let isShotCharging = false;
+        let shotPower = 0;
+        const maxShotPower = 100;
+        let languageData = {}; // Dil verilerini tutacak obje
+        let currentLanguage = 'en'; // Varsayılan dil
+
+        const translations = {
+            'tr': {
+                gameTitle: "SoccerTR",
+                matchButton: "Maç Yap",
+                packOpenButton: "Paket Aç",
+                squadButton: "Kadro",
+                leaguesButton: "Ligler",
+                settingsButton: "Ayarlar",
+                matchSelectionTitle: "Maç Seçimi",
+                '1v1BotMatch': "1v1 (Bot)",
+                '11v11BotMatch': "11v11 (Bot)",
+                backButton: "Geri",
+                // Diğer çeviriler buraya eklenecek
+            },
+            'en': {
+                gameTitle: "SoccerTR",
+                matchButton: "Play Match",
+                packOpenButton: "Open Pack",
+                squadButton: "Squad",
+                leaguesButton: "Leagues",
+                settingsButton: "Settings",
+                matchSelectionTitle: "Match Selection",
+                '1v1BotMatch': "1v1 (Bot)",
+                '11v11BotMatch': "11v11 (Bot)",
+                backButton: "Back",
+                // Diğer çeviriler buraya eklenecek
+            },
+            // Diğer diller için çeviriler eklenecek
+        };
+
+        function loadLanguage(lang) {
+            currentLanguage = lang;
+            languageData = translations[lang];
+            updateUIForLanguage();
+        }
+
+        function updateUIForLanguage() {
+            document.querySelectorAll('[data-key]').forEach(element => {
+                const key = element.getAttribute('data-key');
+                if (languageData[key]) {
+                    element.textContent = languageData[key];
+                }
+            });
+        }
+
+        function init3DScene() {
+            // Sahne
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87CEEB); // Gökyüzü mavisi
+
+            // Kamera
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 20, 50); // Sahayı yukarıdan ve geriden görecek şekilde ayarla
+            camera.lookAt(0, 0, 0);
+
+            // Renderer
+            const gameContainer = document.getElementById('game-container');
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(gameContainer.clientWidth, gameContainer.clientHeight);
+            gameContainer.appendChild(renderer.domElement);
+
+            // Zemin (Futbol Sahası)
+            const fieldGeometry = new THREE.BoxGeometry(100, 0.5, 60); // Genişlik, Yükseklik, Derinlik
+            const fieldMaterial = new THREE.MeshLambertMaterial({ color: 0x008000 }); // Yeşil çim
+            field = new THREE.Mesh(fieldGeometry, fieldMaterial);
+            field.position.y = -0.25; // Yere tam oturması için
+            scene.add(field);
+
+            // Top
+            const ballGeometry = new THREE.SphereGeometry(1, 32, 32);
+            const ballMaterial = new THREE.MeshPhongMaterial({ color: 0xffffff }); // Beyaz top
+            ball = new THREE.Mesh(ballGeometry, ballMaterial);
+            ball.position.set(0, 1, 0); // Sahanın ortasında
+            scene.add(ball);
+
+            // Kale (Basit küp olarak)
+            const goalGeometry = new THREE.BoxGeometry(10, 5, 2);
+            const goalMaterial = new THREE.MeshBasicMaterial({ color: 0xcccccc, transparent: true, opacity: 0.6 });
+            goal1 = new THREE.Mesh(goalGeometry, goalMaterial);
+            goal1.position.set(0, 2.5, -28); // Sahanın bir ucunda
+            scene.add(goal1);
+
+            goal2 = new THREE.Mesh(goalGeometry, goalMaterial);
+            goal2.position.set(0, 2.5, 28); // Sahanın diğer ucunda
+            scene.add(goal2);
+
+
+            // Işıklandırma
+            const ambientLight = new THREE.AmbientLight(0x404040); // Hafif genel ışık
+            scene.add(ambientLight);
+
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 1); // Güneş gibi yönlü ışık
+            directionalLight.position.set(20, 50, 30);
+            directionalLight.castShadow = true; // Gölgeleri etkinleştir (opsiyonel, performans etkiler)
+            scene.add(directionalLight);
+
+            // Pencere boyutu değiştiğinde sahneyi ayarla
+            window.addEventListener('resize', onWindowResize, false);
+        }
+
+        function onWindowResize() {
+            const gameContainer = document.getElementById('game-container');
+            camera.aspect = gameContainer.clientWidth / gameContainer.clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(gameContainer.clientWidth, gameContainer.clientHeight);
+        }
+
+        // --- Animasyon Döngüsü ---
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // Topu y ekseninde hafifçe döndür (örnek animasyon)
+            ball.rotation.y += 0.01;
+
+            if (isShotCharging) {
+                shotPower += 1; // Güç barını artır
+                if (shotPower > maxShotPower) {
+                    shotPower = maxShotPower;
+                }
+                const shotPowerBar = document.getElementById('shot-power');
+                shotPowerBar.style.width = `${shotPower}%`;
+
+                // Renk değişimi: Yeşil -> Turuncu -> Kırmızı
+                let color;
+                if (shotPower < maxShotPower / 3) {
+                    color = 'green';
+                } else if (shotPower < maxShotPower * 2 / 3) {
+                    color = 'orange';
+                } else {
+                    color = 'red';
+                }
+                shotPowerBar.style.background = color; // Basit renk değişimi
+                // Daha kompleks için linear-gradient kullanılabilir:
+                // shotPowerBar.style.background = `linear-gradient(to right, green ${maxShotPower/3}%, orange ${maxShotPower*2/3}%, red ${shotPower}%)`;
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        // --- UI ve Oyun Akışı Yönetimi ---
+        let gameCoins = 1000; // Başlangıç coin miktarı
+
+        function updateCoinDisplay() {
+            document.getElementById('coin-display').textContent = `Coins: ${gameCoins}`;
+        }
+
+        function showLanguageSelection() {
+            document.getElementById('language-screen').classList.remove('hidden');
+            document.getElementById('main-menu').classList.add('hidden');
+            document.getElementById('match-selection-menu').classList.add('hidden');
+            // Oyun arayüzü gizli kalsın
+        }
+
+        function selectLanguage(lang) {
+            loadLanguage(lang);
+            document.getElementById('language-screen').classList.add('hidden');
+            showMainMenu();
+        }
+
+        function showMainMenu() {
+            document.getElementById('main-menu').classList.remove('hidden');
+            document.getElementById('match-selection-menu').classList.add('hidden');
+            // Diğer menüleri gizle
+        }
+
+        function startGame(feature) {
+            console.log(`${feature} özelliği başlatıldı!`);
+            document.getElementById('main-menu').classList.add('hidden');
+
+            if (feature === 'match') {
+                document.getElementById('match-selection-menu').classList.remove('hidden');
+            } else {
+                // Diğer özellikler için (Paket Açma, Kadro vb.) ayrı ekranlar gösterilebilir.
+                // Şimdilik ana menüden çıkılıyor.
+                // Bu bölümde ilgili arayüz elementlerini görünür yapmalısınız.
+            }
+        }
+
+        function startMatch(type) {
+            console.log(`${type} maç başladı!`);
+            document.getElementById('ui-overlay').classList.add('hidden'); // UI'ı gizle
+            document.getElementById('shot-bar').style.display = 'block'; // Şut barını göster
+
+            // Maç mantığını başlat: top, oyuncu hareketleri vb.
+            // 1v1 veya 11v11 bot mantığı burada devreye girecek.
+            // Örneğin:
+            if (type === '1v1') {
+                console.log("1v1 bot maçı başlıyor...");
+                // Basit top kontrolü ve vurma mekanizması
+                // Klavye dinleyicilerini etkinleştir
+                document.addEventListener('keydown', handleKeyDown);
+                document.addEventListener('keyup', handleKeyUp);
+            } else if (type === '11v11') {
+                console.log("11v11 bot maçı başlıyor...");
+                // Gelişmiş oyuncu ve top kontrolü, AI entegrasyonu
+            }
+        }
+
+        function showGameUI() {
+             document.getElementById('ui-overlay').classList.remove('hidden');
+        }
+
+        function handleKeyDown(event) {
+            if (event.key === ' ' && !isShotCharging) { // Boşluk tuşu ile vuruş başlat
+                isShotCharging = true;
+                shotPower = 0;
+                document.getElementById('shot-bar').style.display = 'block';
+            }
+            // Diğer hareket tuşları (W, A, S, D) buraya eklenebilir
+        }
+
+        function handleKeyUp(event) {
+            if (event.key === ' ' && isShotCharging) { // Boşluk tuşu bırakıldığında vuruş yap
+                isShotCharging = false;
+                document.getElementById('shot-bar').style.display = 'none';
+                console.log(`Vuruş gücü: ${shotPower}`);
+                // Topa bu güce göre bir itme kuvveti uygula
+                // Örneğin: ball.position.z -= (shotPower / maxShotPower) * 10;
+                // Gerçek fizik motoru ile daha doğru bir vuruş yapılabilir.
+            }
+        }
+
+        // Oyun başladığında çağrılacak fonksiyonlar
+        document.addEventListener('DOMContentLoaded', () => {
+            init3DScene(); // 3D sahneyi başlat
+            animate();    // Animasyon döngüsünü başlat
+            showLanguageSelection(); // İlk olarak dil seçim ekranını göster
+            updateCoinDisplay(); // Coin miktarını güncelle
+        });
+
+        // Test amaçlı, coin artırma fonksiyonu (ileride UI'dan çağrılacak)
+        function addCoins(amount) {
+            gameCoins += amount;
+            updateCoinDisplay();
+        }
+
+        // Kadro dışı kapasitesi artırma örneği
+        let reserveCapacity = 500;
+        function increaseReserveCapacity() {
+            if (gameCoins >= 100) {
+                gameCoins -= 100;
+                reserveCapacity += 100;
+                updateCoinDisplay();
+                console.log(`Kadro dışı kapasitesi: ${reserveCapacity}`);
+            } else {
+                console.log("Yeterli coin yok!");
+            }
+        }
+    </script>
+</body>
+</html>
